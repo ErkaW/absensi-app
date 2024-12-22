@@ -1,0 +1,25 @@
+filebeat.inputs:
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/apache2/*.log  # Adjust according to your PHP log location
+
+output.logstash:
+  hosts: ["logstash:5044"]  # Send logs to Logstash service
+
+# Optional: Define log formatting and processors for PHP logs
+processors:
+  - decode_csv_fields:
+      fields:
+        message: log
+      separator: ","
+      ignore_missing: false
+      overwrite_keys: true
+  - drop_event:
+      when:
+        regexp:
+          message: '^\s*$'  # Drop empty lines
+
+# Elasticsearch output (if you want to send directly to Elasticsearch without Logstash)
+# output.elasticsearch:
+#   hosts: ["elasticsearch:9200"]

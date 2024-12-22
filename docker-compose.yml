@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  # PHP Service
+  php:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: webapp-php
+    volumes:
+      - ./app:/var/www/html/
+      - ./logs:/var/log/php/   # Mount the local ./logs directory to /var/log/php in the container
+    ports:
+      - "8101:80"
+    depends_on:
+      - mysql
+    networks:
+      - elk
+
+  # MySQL Service
+  mysql:
+    image: mysql:latest
+    container_name: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: 12345678
+      MYSQL_DATABASE: absensi
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./sql:/docker-entrypoint-initdb.d # Auto-import SQL files
+    networks:
+      - elk
+
+  # Logstash Service
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.16.2
+    container_name: logstash
+    volumes:
+      - ./logstash/logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+    depends_on:
+      - mysql
+    networks:
+      - elk
+    ports:
+      - "5044:5044" # For Filebeat or direct log forwarding
+      - "9600:9600" # Logstash monitoring API
+
+  # Elasticsearch Service
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.16.2
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - ELASTICSEARCH_PASSWORD=changeme
+      - xpack.security.enabled=false  # Disable security
+    ports:
+      - "9200:9200"
+    networks:
+      - elk
+    restart: unless-stopped
+
+  # Kibana Service
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.16.2
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - xpack.security.enabled=false  # Disable security in Kibana
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - elk
+    restart: unless-stopped
+
+  # phpMyAdmin Service
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    container_name: webapp-phpmyadmin
+    ports:
+      - "8102:80"  # You can access phpMyAdmin on port 8102
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      MYSQL_ROOT_PASSWORD: 12345678
+    depends_on:
+      - mysql
+    networks:
+      - elk
+
+  # Filebeat Service
+  filebeat:
+    build:
+      context: ./filebeat # Point to the directory with your Dockerfile for Filebeat
+    container_name: filebeat
+    command: filebeat -e -strict.perms=false
+    volumes:
+      - ./logs:/var/log/php  # Assuming logs are stored in ./logs on host
+      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml  # Mount the filebeat config file
+    ports:
+      - "5045:5045"  # Filebeat sends logs to Logstash here
+    depends_on:
+      - logstash
+    networks:
+      - elk
+
+volumes:
+  db_data:
+
+networks:
+  elk:
+    driver: bridge
